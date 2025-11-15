@@ -9,3 +9,16 @@
 
 
 # message()
+
+name = "Betty"
+
+
+def hello(name):
+    # using the global variable instead of the parameter by mistake
+    print("Hello", name)
+
+
+hello("Steve")
+hello("asdas")
+
+print("Hello", name)
