@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 
 
 def print_usage():
@@ -13,122 +14,215 @@ def print_usage():
     print("Directory containing weather data files")
 
 
-if len(sys.argv) != 3:
-    print_usage()
-    sys.exit(1)
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="Weather data analysis tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "report_num",
+        type=str,
+        choices=["1", "2"],
+    )
+    parser.add_argument(
+        "data_dir",
+        type=str,
+    )
 
-report_num = sys.argv[1]
-data_dir = sys.argv[2]
+    try:
+        return parser.parse_args()
+    except SystemExit:
+        print_usage()
+        sys.exit(1)
 
-if report_num not in ["1", "2"]:
-    print_usage()
-    sys.exit(1)
 
-if not os.path.isdir(data_dir):
-    print_usage()
-    sys.exit(1)
+def validate_directory(dir_path):
+    if not os.path.isdir(dir_path):
+        raise argparse.ArgumentTypeError(f"Directory does not exist: {dir_path}")
 
-if report_num == "1":
-    report = {}
+    files = [
+        f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))
+    ]
+
+    if not files:
+        raise argparse.ArgumentTypeError(f"Directory is empty: {dir_path}")
+
+    text_files = [f for f in files if f.endswith(".txt")]
+    if not text_files:
+        raise argparse.ArgumentTypeError(
+            f"No text files found in directory: {dir_path}"
+        )
+
+    return True
+
+
+def is_valid_line(parts):
+    return not (
+        parts[0] == "PKT"
+        or parts[0] == "PKST"
+        or parts[0].startswith("<!--")
+        or parts[0] == ""
+    )
+
+
+def parse_weather_files(data_dir):
+    weather_data = []
+
     for file in os.listdir(data_dir):
-        year = file.split("_")[2]
-        with open(f"{data_dir}/{file}") as my_file:
+        file_path = os.path.join(data_dir, file)
+        if not os.path.isfile(file_path) or not file.endswith(".txt"):
+            continue
+
+        try:
+            year = file.split("_")[2]
+        except IndexError:
+            continue
+
+        with open(file_path, "r") as my_file:
             for line in my_file:
                 parts = line.strip().split(",")
-                if (
-                    parts[0] == "PKT"
-                    or parts[0] == "PKST"
-                    or parts[0].startswith("<!--")
-                    or parts[0] == ""
-                ):
+                if not is_valid_line(parts):
                     continue
-                if year not in report:
-                    report[year] = {
-                        "maxTemp": None,
-                        "minTemp": None,
-                        "maxHumidity": None,
-                        "minHumidity": None,
-                    }
-                if parts[1] != "":
-                    report[year]["maxTemp"] = (
-                        max(report[year]["maxTemp"], int(parts[1]))
-                        if report[year]["maxTemp"] is not None
-                        else int(parts[1])
-                    )
-                if parts[3] != "":
-                    report[year]["minTemp"] = (
-                        min(report[year]["minTemp"], int(parts[3]))
-                        if report[year]["minTemp"] is not None
-                        else int(parts[3])
-                    )
-                if parts[7] != "":
-                    report[year]["maxHumidity"] = (
-                        max(report[year]["maxHumidity"], int(parts[7]))
-                        if report[year]["maxHumidity"] is not None
-                        else int(parts[7])
-                    )
-                if parts[9] != "":
-                    report[year]["minHumidity"] = (
-                        min(report[year]["minHumidity"], int(parts[9]))
-                        if report[year]["minHumidity"] is not None
-                        else int(parts[9])
-                    )
 
+                weather_data.append(
+                    {
+                        "year": year,
+                        "date": parts[0],
+                        "max_temp": parts[1] if len(parts) > 1 else "",
+                        "min_temp": parts[3] if len(parts) > 3 else "",
+                        "max_humidity": parts[7] if len(parts) > 7 else "",
+                        "min_humidity": parts[9] if len(parts) > 9 else "",
+                    }
+                )
+
+    return weather_data
+
+
+def extract_report_1(weather_data):
+    report = {}
+
+    field_config = {
+        "max_temp": {"func": max},
+        "min_temp": {"func": min},
+        "max_humidity": {"func": max},
+        "min_humidity": {"func": min},
+    }
+
+    for data in weather_data:
+        year = data["year"]
+
+        if year not in report:
+            report[year] = {
+                "max_temp": None,
+                "min_temp": None,
+                "max_humidity": None,
+                "min_humidity": None,
+            }
+        for field_name, config in field_config.items():
+            value_str = data[field_name]
+            if value_str != "":
+                try:
+                    value = int(value_str)
+                    current = report[year][field_name]
+                    if current is None:
+                        report[year][field_name] = value
+                    else:
+                        report[year][field_name] = config["func"](current, value)
+                except ValueError:
+                    continue
+
+    for year in report:
+        for field in report[year]:
+            if report[year][field] is None:
+                report[year][field] = "N/A"
+
+    return report
+
+
+def extract_report_2(weather_data):
+    report = {}
+
+    for data in weather_data:
+        year = data["year"]
+
+        if year not in report:
+            report[year] = {
+                "date": None,
+                "temp": None,
+            }
+
+        max_temp_str = data["max_temp"]
+        if max_temp_str != "":
+            try:
+                temp = int(max_temp_str)
+                current_temp = report[year]["temp"]
+
+                if current_temp is None or temp > current_temp:
+                    report[year]["temp"] = temp
+                    date_parts = data["date"].split("-")
+                    if len(date_parts) == 3:
+                        report[year][
+                            "date"
+                        ] = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}"
+            except ValueError:
+                continue
+
+    for year in report:
+        if report[year]["date"] is None:
+            report[year]["date"] = "N/A"
+        if report[year]["temp"] is None:
+            report[year]["temp"] = "N/A"
+
+    return report
+
+
+def display_report_1(report):
     print("Year    MAX Temp    MIN Temp    MAX Humidity    MIN Humidity")
     print("-" * 70)
     for year in sorted(report.keys()):
-        max_temp = (
-            report[year]["maxTemp"] if report[year]["maxTemp"] is not None else "N/A"
-        )
-        min_temp = (
-            report[year]["minTemp"] if report[year]["minTemp"] is not None else "N/A"
-        )
-        max_humidity = (
-            report[year]["maxHumidity"]
-            if report[year]["maxHumidity"] is not None
-            else "N/A"
-        )
-        min_humidity = (
-            report[year]["minHumidity"]
-            if report[year]["minHumidity"] is not None
-            else "N/A"
-        )
+        max_temp = report[year]["max_temp"]
+        min_temp = report[year]["min_temp"]
+        max_humidity = report[year]["max_humidity"]
+        min_humidity = report[year]["min_humidity"]
         print(
             f"{year}    {max_temp}       {min_temp}        {max_humidity}         {min_humidity}"
         )
 
-elif report_num == "2":
-    report = {}
-    for file in os.listdir(data_dir):
-        year = file.split("_")[2]
-        with open(f"{data_dir}/{file}") as my_file:
-            for line in my_file:
-                parts = line.strip().split(",")
-                if (
-                    parts[0] == "PKT"
-                    or parts[0] == "PKST"
-                    or parts[0].startswith("<!--")
-                    or parts[0] == ""
-                ):
-                    continue
-                if year not in report:
-                    report[year] = {
-                        "date": None,
-                        "temp": None,
-                    }
-                if parts[1] != "":
-                    temp = int(parts[1])
-                    if report[year]["temp"] is None or temp > report[year]["temp"]:
-                        report[year]["temp"] = temp
-                        date_parts = parts[0].split("-")
-                        if len(date_parts) == 3:
-                            report[year][
-                                "date"
-                            ] = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}"
 
+def display_report_2(report):
     print("Year    Date       Temp")
     print("-" * 30)
     for year in sorted(report.keys()):
-        date = report[year]["date"] if report[year]["date"] is not None else "N/A"
-        temp = report[year]["temp"] if report[year]["temp"] is not None else "N/A"
+        date = report[year]["date"]
+        temp = report[year]["temp"]
         print(f"{year}    {date}  {temp}")
+
+
+def main():
+    try:
+        args = parse_arguments()
+        validate_directory(args.data_dir)
+
+        weather_data = parse_weather_files(args.data_dir)
+
+        if not weather_data:
+            print("No valid weather data found in the directory.")
+            sys.exit(1)
+
+        if args.report_num == "1":
+            report = extract_report_1(weather_data)
+            display_report_1(report)
+        elif args.report_num == "2":
+            report = extract_report_2(weather_data)
+            display_report_2(report)
+
+    except argparse.ArgumentTypeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Unexpected error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
