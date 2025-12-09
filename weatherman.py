@@ -1,14 +1,18 @@
 import os
 import sys
 import argparse
+from datetime import datetime
+
+TEMPERATURE_REPORT = "1"
+HOTTEST_DAY_REPORT = "2"
 
 
 def print_usage():
     print("Usage: weatherman [report#] [data_dir]")
     print()
     print("[Report #]")
-    print("1 for Annual Max/Min Temperature")
-    print("2 for Hottest day of each year")
+    print(f"{TEMPERATURE_REPORT} for Annual Max/Min Temperature")
+    print(f"{HOTTEST_DAY_REPORT} for Hottest day of each year")
     print()
     print("[data_dir]")
     print("Directory containing weather data files")
@@ -22,7 +26,7 @@ def parse_arguments():
     parser.add_argument(
         "report_num",
         type=str,
-        choices=["1", "2"],
+        choices=[TEMPERATURE_REPORT, HOTTEST_DAY_REPORT],
     )
     parser.add_argument(
         "data_dir",
@@ -40,29 +44,20 @@ def validate_directory(dir_path):
     if not os.path.isdir(dir_path):
         raise argparse.ArgumentTypeError(f"Directory does not exist: {dir_path}")
 
-    files = [
-        f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))
-    ]
+    files = [f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))]
 
     if not files:
         raise argparse.ArgumentTypeError(f"Directory is empty: {dir_path}")
 
     text_files = [f for f in files if f.endswith(".txt")]
     if not text_files:
-        raise argparse.ArgumentTypeError(
-            f"No text files found in directory: {dir_path}"
-        )
+        raise argparse.ArgumentTypeError(f"No text files found in directory: {dir_path}")
 
     return True
 
 
 def is_valid_line(parts):
-    return not (
-        parts[0] == "PKT"
-        or parts[0] == "PKST"
-        or parts[0].startswith("<!--")
-        or parts[0] == ""
-    )
+    return not (parts[0] == "PKT" or parts[0] == "PKST" or parts[0].startswith("<!--") or parts[0] == "")
 
 
 def parse_weather_files(data_dir):
@@ -81,6 +76,7 @@ def parse_weather_files(data_dir):
         with open(file_path, "r") as my_file:
             for line in my_file:
                 parts = line.strip().split(",")
+
                 if not is_valid_line(parts):
                     continue
 
@@ -94,7 +90,6 @@ def parse_weather_files(data_dir):
                         "min_humidity": parts[9] if len(parts) > 9 else "",
                     }
                 )
-
     return weather_data
 
 
@@ -159,11 +154,8 @@ def extract_report_2(weather_data):
 
                 if current_temp is None or temp > current_temp:
                     report[year]["temp"] = temp
-                    date_parts = data["date"].split("-")
-                    if len(date_parts) == 3:
-                        report[year][
-                            "date"
-                        ] = f"{date_parts[2]}/{date_parts[1]}/{date_parts[0]}"
+                    date_obj = datetime.strptime(data["date"], "%Y-%m-%d")
+                    report[year]["date"] = date_obj.strftime("%d/%m/%Y")
             except ValueError:
                 continue
 
@@ -184,9 +176,7 @@ def display_report_1(report):
         min_temp = report[year]["min_temp"]
         max_humidity = report[year]["max_humidity"]
         min_humidity = report[year]["min_humidity"]
-        print(
-            f"{year}    {max_temp}       {min_temp}        {max_humidity}         {min_humidity}"
-        )
+        print(f"{year}    {max_temp}       {min_temp}        {max_humidity}         {min_humidity}")
 
 
 def display_report_2(report):
@@ -209,10 +199,10 @@ def main():
             print("No valid weather data found in the directory.")
             sys.exit(1)
 
-        if args.report_num == "1":
+        if args.report_num == TEMPERATURE_REPORT:
             report = extract_report_1(weather_data)
             display_report_1(report)
-        elif args.report_num == "2":
+        elif args.report_num == HOTTEST_DAY_REPORT:
             report = extract_report_2(weather_data)
             display_report_2(report)
 
